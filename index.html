@@ -77,6 +77,36 @@
         <section class="control-section hidden" id="physical-controls">
           <h2>물리 모드 설정</h2>
 
+          <!-- Musical Scale Selector -->
+          <div id="scale-selector" style="display: none; margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+            <label style="display: block; margin-bottom: 10px; font-weight: bold; color: #4fc3f7;">🎹 Musical Scale</label>
+
+            <div style="margin: 10px 0;">
+              <label style="display: inline-block; width: 70px; color: rgba(255,255,255,0.8);">Octave:</label>
+              <button class="octave-btn" data-octave="3">3</button>
+              <button class="octave-btn active" data-octave="4">4</button>
+              <button class="octave-btn" data-octave="5">5</button>
+              <button class="octave-btn" data-octave="6">6</button>
+            </div>
+
+            <div style="margin: 10px 0;">
+              <label style="display: inline-block; width: 70px; color: rgba(255,255,255,0.8);">Note:</label>
+              <button class="note-btn" data-note="C">C<br><small>도</small></button>
+              <button class="note-btn" data-note="D">D<br><small>레</small></button>
+              <button class="note-btn" data-note="E">E<br><small>미</small></button>
+              <button class="note-btn" data-note="F">F<br><small>파</small></button>
+              <button class="note-btn" data-note="G">G<br><small>솔</small></button>
+              <button class="note-btn active" data-note="A">A<br><small>라</small></button>
+              <button class="note-btn" data-note="B">B<br><small>시</small></button>
+            </div>
+
+            <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 5px; text-align: center;">
+              <small style="color: rgba(255,255,255,0.6);">Current Frequency:</small><br>
+              <span id="current-frequency" style="font-size: 24px; font-weight: bold; color: #4CAF50;">440 Hz</span>
+              <span id="current-note-name" style="color: rgba(255,255,255,0.7); font-size: 14px; margin-left: 5px;">(A4 - 라)</span>
+            </div>
+          </div>
+
           <!-- Fix Point Mode toggle -->
           <div class="toggle-group">
             <label class="toggle-label">
