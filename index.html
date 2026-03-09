@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>클라드니 패턴 시뮬레이션</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>클라드니 패턴 시뮬레이션</h1>
+      <p class="subtitle">Chladni Pattern Interactive Simulation</p>
+    </header>
+
+    <main class="main">
+      <div class="canvas-wrapper">
+        <canvas id="chladniCanvas"></canvas>
+        <div id="hoverInfo" class="hover-info hidden">
+          진동 강도: <span id="hoverValue">0.00</span>
+        </div>
+      </div>
+
+      <aside class="controls">
+        <section class="control-section">
+          <h2>진동 모드 설정</h2>
+
+          <div class="control-group">
+            <label for="modeM">
+              X 모드 (m)
+              <span class="value-badge" id="modeM-value">3</span>
+            </label>
+            <input
+              type="range"
+              id="modeM"
+              min="1"
+              max="10"
+              value="3"
+              step="1"
+            />
+          </div>
+
+          <div class="control-group">
+            <label for="modeN">
+              Y 모드 (n)
+              <span class="value-badge" id="modeN-value">2</span>
+            </label>
+            <input
+              type="range"
+              id="modeN"
+              min="1"
+              max="10"
+              value="2"
+              step="1"
+            />
+          </div>
+        </section>
+
+        <section class="control-section">
+          <h2>입자 설정</h2>
+
+          <div class="control-group">
+            <label for="particleCount">
+              입자 수
+              <span class="value-badge" id="particleCount-value">5000</span>
+            </label>
+            <input
+              type="range"
+              id="particleCount"
+              min="1000"
+              max="10000"
+              value="5000"
+              step="500"
+            />
+          </div>
+        </section>
+
+        <section class="control-section">
+          <h2>추가 설정</h2>
+
+          <div class="toggle-group">
+            <label class="toggle-label">
+              <input type="checkbox" id="showHeatmap" checked />
+              <span class="toggle-switch"></span>
+              진동 히트맵 표시
+            </label>
+          </div>
+        </section>
+
+        <div class="button-group">
+          <button id="resetBtn" class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 .49-5"></path>
+            </svg>
+            리셋
+          </button>
+          <button id="saveBtn" class="btn btn-secondary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            저장 (PNG)
+          </button>
+        </div>
+
+        <section class="info-panel">
+          <h2>현재 상태</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">모드</span>
+              <span class="info-value" id="info-mode">m=3, n=2</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">입자 수</span>
+              <span class="info-value" id="info-particles">5000</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">FPS</span>
+              <span class="info-value" id="info-fps">0</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">수렴률</span>
+              <span class="info-value" id="info-convergence">0%</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="presets">
+          <h2>프리셋 패턴</h2>
+          <div class="preset-grid">
+            <button class="preset-btn" data-m="1" data-n="1">1×1</button>
+            <button class="preset-btn" data-m="2" data-n="1">2×1</button>
+            <button class="preset-btn" data-m="2" data-n="2">2×2</button>
+            <button class="preset-btn" data-m="3" data-n="2">3×2</button>
+            <button class="preset-btn" data-m="3" data-n="3">3×3</button>
+            <button class="preset-btn" data-m="4" data-n="3">4×3</button>
+            <button class="preset-btn" data-m="5" data-n="4">5×4</button>
+            <button class="preset-btn" data-m="6" data-n="5">6×5</button>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="js/chladni.js"></script>
+</body>
+</html>
