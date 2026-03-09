@@ -94,6 +94,38 @@
 
           <p class="fix-point-message" id="fixPointMessage">고정점 추가 모드를 켜서 고정점을 추가하세요</p>
 
+          <!-- Vibration Amplitude -->
+          <div class="control-group">
+            <label for="vibration-amplitude">
+              🎚️ Vibration Amplitude
+              <span class="value-badge" id="vibration-amplitude-value">50%</span>
+            </label>
+            <input
+              type="range"
+              id="vibration-amplitude"
+              min="0"
+              max="100"
+              value="50"
+              step="1"
+            />
+          </div>
+
+          <!-- Force Scale -->
+          <div class="control-group">
+            <label for="force-scale">
+              ⚡ Force Scale
+              <span class="value-badge" id="force-scale-value">100%</span>
+            </label>
+            <input
+              type="range"
+              id="force-scale"
+              min="10"
+              max="200"
+              value="100"
+              step="5"
+            />
+          </div>
+
           <!-- Bow Position -->
           <div class="bow-position-control">
             <label class="bow-label">🎻 활 위치 (Bow Position):</label>
