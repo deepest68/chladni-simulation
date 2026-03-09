@@ -1,7 +1,8 @@
 /**
  * chladni.js — 클라드니 패턴 인터랙티브 시뮬레이션
  *
- * 클라드니 방정식:  z = sin(m·π·x) · sin(n·π·y)
+ * 수학적 모드:  z = sin(m·π·x) · sin(n·π·y)
+ * 물리적 모드:  고정점 + 활 위치 기반 파동 중첩 시뮬레이션
  * 입자들은 진동 강도가 낮은 노드 라인으로 이동합니다.
  */
 
@@ -30,6 +31,12 @@ const CONFIG = {
 
   // FPS counter update interval (ms)
   FPS_INTERVAL: 500,
+
+  // Physical mode: total fixed-point limit (1 center + 2 user)
+  MAX_FIXED_POINTS: 3,
+
+  // Physical mode: normalised radius for hit-testing fixed points on click
+  FP_HIT_RADIUS: 0.05,
 };
 
 /* ─────────────────────────────────────────────
@@ -79,6 +86,105 @@ class ChladniField {
   /**
    * Compute the spatial gradient of the amplitude at (nx, ny).
    * Returns {gx, gy} pointing in the direction of increasing amplitude.
+   */
+  gradient(nx, ny) {
+    const eps = 1 / (this.res - 1);
+    const gx = (this.sample(nx + eps, ny) - this.sample(nx - eps, ny)) / (2 * eps);
+    const gy = (this.sample(nx, ny + eps) - this.sample(nx, ny - eps)) / (2 * eps);
+    return { gx, gy };
+  }
+}
+
+/* ─────────────────────────────────────────────
+   Realistic Chladni Field (Physical Mode)
+   Computes vibration amplitude based on:
+   - Fixed points (nodes where amplitude = 0)
+   - Bow position (excitation source at edge)
+   using wave superposition.
+───────────────────────────────────────────── */
+class RealisticChladniField {
+  constructor(res) {
+    this.res = res;
+    this.data = new Float32Array(res * res);
+    // Default state
+    this.fixedPoints = [{ x: 0.5, y: 0.5, type: 'center', removable: false }];
+    this.bowPosition = 'bottom';
+  }
+
+  /**
+   * Rebuild the field based on current fixedPoints and bowPosition.
+   */
+  compute(fixedPoints, bowPosition) {
+    this.fixedPoints = fixedPoints;
+    this.bowPosition = bowPosition;
+    const { res, data } = this;
+
+    // Compute raw amplitude at each grid cell
+    let maxVal = 0;
+    for (let row = 0; row < res; row++) {
+      for (let col = 0; col < res; col++) {
+        const x = col / (res - 1);
+        const y = row / (res - 1);
+
+        // Excitation from bow position
+        const excitation = this._calculateExcitation(x, y);
+
+        // Contribution from each fixed point (wave from that point)
+        let amplitude = 0;
+        for (const fp of fixedPoints) {
+          const dist = Math.sqrt((x - fp.x) ** 2 + (y - fp.y) ** 2);
+          // Standing wave: sin(dist * π * freq) decays away from fixed point
+          amplitude += Math.sin(dist * Math.PI * 8) / (1 + dist * 6);
+        }
+
+        // Modulate by excitation
+        const val = Math.abs(amplitude * excitation);
+        data[row * res + col] = val;
+        if (val > maxVal) maxVal = val;
+      }
+    }
+
+    // Normalise to [0, 1]
+    if (maxVal > 0) {
+      for (let i = 0; i < data.length; i++) {
+        data[i] /= maxVal;
+      }
+    }
+  }
+
+  /**
+   * Excitation intensity at (x, y) from the bow position.
+   * Bow sits at one edge and drives maximum vibration there.
+   */
+  _calculateExcitation(x, y) {
+    switch (this.bowPosition) {
+      case 'top':    return Math.exp(-(y ** 2) * 20);
+      case 'bottom': return Math.exp(-((1 - y) ** 2) * 20);
+      case 'left':   return Math.exp(-(x ** 2) * 20);
+      case 'right':  return Math.exp(-((1 - x) ** 2) * 20);
+      default:       return 1;
+    }
+  }
+
+  /**
+   * Bilinear sample — identical interface to ChladniField.sample().
+   */
+  sample(nx, ny) {
+    const { res, data } = this;
+    const fx = Math.max(0, Math.min(1, nx)) * (res - 1);
+    const fy = Math.max(0, Math.min(1, ny)) * (res - 1);
+    const col = Math.floor(fx);
+    const row = Math.floor(fy);
+    const tx  = fx - col;
+    const ty  = fy - row;
+    const c1  = Math.min(col + 1, res - 1);
+    const r1  = Math.min(row + 1, res - 1);
+    return (1 - ty) * ((1 - tx) * data[row * res + col]  + tx * data[row * res + c1])
+          +     ty  * ((1 - tx) * data[r1  * res + col]  + tx * data[r1  * res + c1]);
+  }
+
+  /**
+   * Spatial gradient — identical interface to ChladniField.gradient().
    */
   gradient(nx, ny) {
     const eps = 1 / (this.res - 1);
@@ -194,12 +300,22 @@ class ChladniSimulation {
   constructor() {
     this.canvas   = document.getElementById('chladniCanvas');
     this.ctx      = this.canvas.getContext('2d');
-    this.field    = new ChladniField(CONFIG.FIELD_RES);
+    this.mathField    = new ChladniField(CONFIG.FIELD_RES);
+    this.physField    = new RealisticChladniField(CONFIG.FIELD_RES);
     this.heatmap  = new HeatmapRenderer(CONFIG.FIELD_RES);
     this.particles = [];
 
+    // Mathematical mode params
     this.m = 3;
     this.n = 2;
+
+    // Physical mode params
+    this.fixedPoints = [{ x: 0.5, y: 0.5, type: 'center', removable: false }];
+    this.bowPosition = 'bottom';
+    this.fixPointMode = false;  // whether clicks add fixed points
+
+    // Shared state
+    this.simulationMode = 'math'; // 'math' | 'physical'
     this.particleCount = 5000;
     this.showHeatmap   = true;
     this.rafId         = null;
@@ -215,6 +331,11 @@ class ChladniSimulation {
     window.addEventListener('resize', () => this._resize());
     this._reset();
     this._loop();
+  }
+
+  /* ── Current active field ───────────────────── */
+  get field() {
+    return this.simulationMode === 'math' ? this.mathField : this.physField;
   }
 
   /* ── UI binding ─────────────────────────────── */
@@ -235,12 +356,53 @@ class ChladniSimulation {
     // Save PNG button
     document.getElementById('saveBtn').addEventListener('click', () => this._saveImage());
 
-    // Preset buttons
+    // Preset buttons (mathematical)
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const m = parseInt(btn.dataset.m, 10);
         const n = parseInt(btn.dataset.n, 10);
         this._applyPreset(m, n);
+      });
+    });
+
+    // ── Mode selection ──
+    document.querySelectorAll('input[name="simMode"]').forEach(radio => {
+      radio.addEventListener('change', e => {
+        this.simulationMode = e.target.value;
+        this._onModeChange();
+      });
+    });
+
+    // ── Physical mode controls ──
+
+    // Fix Point Mode toggle
+    document.getElementById('fixPointMode').addEventListener('change', e => {
+      this.fixPointMode = e.target.checked;
+      this._updateFixPointUI();
+    });
+
+    // Reset Fixed Points button
+    document.getElementById('resetFixedPointsBtn').addEventListener('click', () => {
+      this._resetFixedPoints();
+    });
+
+    // Bow position buttons
+    document.querySelectorAll('.bow-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.bowPosition = btn.dataset.position;
+        document.querySelectorAll('.bow-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('bow-pos').textContent = btn.textContent.trim();
+        this._rebuildField();
+      });
+    });
+
+    // Physical presets
+    document.querySelectorAll('.physical-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fp   = JSON.parse(btn.dataset.fixedpoints);
+        const bow  = btn.dataset.bow;
+        this._applyPhysicalPreset(fp, bow);
       });
     });
 
@@ -259,7 +421,37 @@ class ChladniSimulation {
       hoverInfo.classList.add('hidden');
     });
 
-    // Touch support
+    // Canvas click — add / remove fixed points in physical mode
+    this.canvas.addEventListener('click', e => {
+      if (this.simulationMode !== 'physical' || !this.fixPointMode) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width;
+      const ny = (e.clientY - rect.top)  / rect.height;
+
+      // Check if clicking near an existing removable fixed point
+      const hitIdx = this.fixedPoints.findIndex(fp =>
+        fp.removable &&
+        Math.sqrt((nx - fp.x) ** 2 + (ny - fp.y) ** 2) < CONFIG.FP_HIT_RADIUS
+      );
+      if (hitIdx !== -1) {
+        this.fixedPoints.splice(hitIdx, 1);
+        this._rebuildField();
+        this._updateFixPointUI();
+        return;
+      }
+
+      // Add new fixed point (max 2 user points = MAX_FIXED_POINTS total)
+      if (this.fixedPoints.length < CONFIG.MAX_FIXED_POINTS) {
+        this.fixedPoints.push({ x: nx, y: ny, type: 'user', removable: true });
+        this._rebuildField();
+        this._updateFixPointUI();
+      } else {
+        this._showFixPointMessage('maximum');
+      }
+    });
+
+    // Touch support for hover
     this.canvas.addEventListener('touchmove', e => {
       e.preventDefault();
       const rect   = this.canvas.getBoundingClientRect();
@@ -270,8 +462,30 @@ class ChladniSimulation {
       hoverValue.textContent = v.toFixed(3);
       hoverInfo.classList.remove('hidden');
     }, { passive: false });
-    this.canvas.addEventListener('touchend', () => {
+    this.canvas.addEventListener('touchend', e => {
       hoverInfo.classList.add('hidden');
+      // Touch tap — add fixed point
+      if (this.simulationMode !== 'physical' || !this.fixPointMode) return;
+      if (e.changedTouches.length === 0) return;
+      const rect  = this.canvas.getBoundingClientRect();
+      const touch = e.changedTouches[0];
+      const nx = (touch.clientX - rect.left) / rect.width;
+      const ny = (touch.clientY - rect.top)  / rect.height;
+      const hitIdx = this.fixedPoints.findIndex(fp =>
+        fp.removable &&
+        Math.sqrt((nx - fp.x) ** 2 + (ny - fp.y) ** 2) < CONFIG.FP_HIT_RADIUS
+      );
+      if (hitIdx !== -1) {
+        this.fixedPoints.splice(hitIdx, 1);
+        this._rebuildField();
+        this._updateFixPointUI();
+        return;
+      }
+      if (this.fixedPoints.length < CONFIG.MAX_FIXED_POINTS) {
+        this.fixedPoints.push({ x: nx, y: ny, type: 'user', removable: true });
+        this._rebuildField();
+        this._updateFixPointUI();
+      }
     });
   }
 
@@ -284,6 +498,49 @@ class ChladniSimulation {
       onChange(v);
     };
     slider.addEventListener('input', update);
+  }
+
+  /* ── Mode switch ────────────────────────────── */
+  _onModeChange() {
+    const isMath = this.simulationMode === 'math';
+    document.getElementById('math-controls').classList.toggle('hidden', !isMath);
+    document.getElementById('physical-controls').classList.toggle('hidden', isMath);
+    document.getElementById('math-presets').classList.toggle('hidden', !isMath);
+    document.getElementById('physical-presets').classList.toggle('hidden', isMath);
+    this._updateInfoPanel();
+    this._rebuildField();
+  }
+
+  /* ── Fixed point helpers ────────────────────── */
+  _resetFixedPoints() {
+    this.fixedPoints = [{ x: 0.5, y: 0.5, type: 'center', removable: false }];
+    this._rebuildField();
+    this._updateFixPointUI();
+  }
+
+  _updateFixPointUI() {
+    const max = CONFIG.MAX_FIXED_POINTS;
+    document.getElementById('fixedPointCount').textContent =
+      `${this.fixedPoints.length}/${max}`;
+    const msg = document.getElementById('fixPointMessage');
+    if (this.fixedPoints.length >= max) {
+      msg.textContent = `고정점이 최대 개수(${max}개)에 도달했습니다`;
+      msg.className = 'fix-point-message warning';
+    } else if (this.fixPointMode) {
+      msg.textContent = `캔버스를 클릭하여 고정점 추가 (최대 ${max - 1}개 추가 가능)`;
+      msg.className = 'fix-point-message active';
+    } else {
+      msg.textContent = '고정점 추가 모드를 켜서 고정점을 추가하세요';
+      msg.className = 'fix-point-message';
+    }
+  }
+
+  _showFixPointMessage(type) {
+    const msg = document.getElementById('fixPointMessage');
+    if (type === 'maximum') {
+      msg.textContent = `고정점이 최대 개수(${CONFIG.MAX_FIXED_POINTS}개)에 도달했습니다`;
+      msg.className = 'fix-point-message warning';
+    }
   }
 
   /* ── Resize canvas to fill wrapper ─────────── */
@@ -301,16 +558,26 @@ class ChladniSimulation {
 
   /* ── Field / particle management ───────────── */
   _rebuildField() {
-    this.field.compute(this.m, this.n);
-    this.heatmap.update(this.field);
+    if (this.simulationMode === 'math') {
+      this.mathField.compute(this.m, this.n);
+      this.heatmap.update(this.mathField);
+    } else {
+      this.physField.compute(this.fixedPoints, this.bowPosition);
+      this.heatmap.update(this.physField);
+    }
     // Scatter particles so they find new node lines
     this.particles.forEach(p => p.reset(this.canvas.width, this.canvas.height));
     this._updateInfoPanel();
   }
 
   _reset() {
-    this.field.compute(this.m, this.n);
-    this.heatmap.update(this.field);
+    if (this.simulationMode === 'math') {
+      this.mathField.compute(this.m, this.n);
+      this.heatmap.update(this.mathField);
+    } else {
+      this.physField.compute(this.fixedPoints, this.bowPosition);
+      this.heatmap.update(this.physField);
+    }
     this.particles = Array.from(
       { length: this.particleCount },
       () => new Particle(this.canvas.width, this.canvas.height)
@@ -349,17 +616,49 @@ class ChladniSimulation {
     this._rebuildField();
   }
 
+  _applyPhysicalPreset(fixedPoints, bowPosition) {
+    this.fixedPoints = fixedPoints;
+    this.bowPosition = bowPosition;
+    // Sync bow button UI
+    document.querySelectorAll('.bow-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.position === bowPosition);
+    });
+    const bowLabel = { top: 'Top', right: 'Right', bottom: 'Bottom', left: 'Left' };
+    document.getElementById('bow-pos').textContent = bowLabel[bowPosition] || bowPosition;
+    // Highlight active physical preset
+    document.querySelectorAll('.physical-preset-btn').forEach(btn => {
+      const bfp  = JSON.parse(btn.dataset.fixedpoints);
+      const bbow = btn.dataset.bow;
+      btn.classList.toggle('active',
+        bbow === bowPosition &&
+        JSON.stringify(bfp) === JSON.stringify(fixedPoints)
+      );
+    });
+    this._updateFixPointUI();
+    this._rebuildField();
+  }
+
   /* ── Save canvas as PNG ─────────────────────── */
   _saveImage() {
     const link = document.createElement('a');
-    link.download = `chladni-m${this.m}-n${this.n}.png`;
+    if (this.simulationMode === 'math') {
+      link.download = `chladni-m${this.m}-n${this.n}.png`;
+    } else {
+      link.download = `chladni-physical-bow${this.bowPosition}.png`;
+    }
     link.href = this.canvas.toDataURL('image/png');
     link.click();
   }
 
   /* ── Info panel ─────────────────────────────── */
   _updateInfoPanel() {
-    document.getElementById('info-mode').textContent     = `m=${this.m}, n=${this.n}`;
+    if (this.simulationMode === 'math') {
+      document.getElementById('info-mode').textContent = `m=${this.m}, n=${this.n}`;
+    } else {
+      const bowLabel = { top: 'Top', right: 'Right', bottom: 'Bottom', left: 'Left' };
+      document.getElementById('info-mode').textContent =
+        `Physical / bow=${bowLabel[this.bowPosition] || this.bowPosition}`;
+    }
     document.getElementById('info-particles').textContent = this.particleCount;
   }
 
@@ -429,6 +728,63 @@ class ChladniSimulation {
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     }
     ctx.fill();
+
+    // Physical mode overlays
+    if (this.simulationMode === 'physical') {
+      this._drawPhysicalOverlay(w, h);
+    }
+  }
+
+  /* ── Physical mode canvas overlays ─────────── */
+  _drawPhysicalOverlay(w, h) {
+    const ctx = this.ctx;
+
+    // Draw bow position highlight
+    ctx.save();
+    ctx.strokeStyle = '#ffd700';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    const PAD = 2;
+    switch (this.bowPosition) {
+      case 'top':    ctx.moveTo(PAD, PAD);     ctx.lineTo(w - PAD, PAD);     break;
+      case 'bottom': ctx.moveTo(PAD, h - PAD); ctx.lineTo(w - PAD, h - PAD); break;
+      case 'left':   ctx.moveTo(PAD, PAD);     ctx.lineTo(PAD, h - PAD);     break;
+      case 'right':  ctx.moveTo(w - PAD, PAD); ctx.lineTo(w - PAD, h - PAD); break;
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Draw fixed points
+    for (const fp of this.fixedPoints) {
+      const px = fp.x * w;
+      const py = fp.y * h;
+      const isCenter = fp.type === 'center';
+      const radius   = isCenter ? 10 : 8;
+      const color    = isCenter ? '#ff4444' : '#ff9944';
+      const arm      = isCenter ? 10 : 8;
+
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle   = color;
+      ctx.lineWidth   = 2;
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = 6;
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Cross
+      ctx.beginPath();
+      ctx.moveTo(px - arm, py); ctx.lineTo(px + arm, py);
+      ctx.moveTo(px, py - arm); ctx.lineTo(px, py + arm);
+      ctx.stroke();
+
+      ctx.restore();
+    }
   }
 }
 
@@ -436,5 +792,8 @@ class ChladniSimulation {
    Bootstrap
 ───────────────────────────────────────────── */
 window.addEventListener('DOMContentLoaded', () => {
-  new ChladniSimulation();
+  const sim = new ChladniSimulation();
+  // Set default active bow button
+  const defaultBow = document.querySelector('.bow-btn[data-default="true"]');
+  if (defaultBow) defaultBow.classList.add('active');
 });
