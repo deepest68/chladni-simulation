@@ -16,10 +16,12 @@ const CONFIG = {
   FIELD_RES: 256,
 
   // Particle physics
-  DAMPING:      0.85,   // velocity damping per frame
-  FORCE_SCALE:  0.8,    // gradient → force multiplier
-  NOISE_SCALE:  0.3,    // random perturbation magnitude
-  MAX_SPEED:    4.0,    // maximum particle speed (px/frame)
+  DAMPING:              0.85,  // velocity damping per frame
+  FORCE_SCALE:          1.0,   // gradient → force multiplier (0.1 ~ 2.0)
+  VIBRATION_AMPLITUDE:  0.5,   // excitation amplitude for physical mode (0.0 ~ 1.0)
+  EXCITATION_DECAY:     3,     // controls how quickly excitation falls off with distance (lower = wider spread)
+  NOISE_SCALE:          0.3,   // random perturbation magnitude
+  MAX_SPEED:            4.0,   // maximum particle speed (px/frame)
 
   // Rendering
   PARTICLE_RADIUS: 1.5,
@@ -112,9 +114,12 @@ class RealisticChladniField {
   }
 
   /**
-   * Rebuild the field based on current fixedPoints and bowPosition.
+   * Rebuild the field based on current fixedPoints, bowPosition and amplitude.
+   * @param {Array}  fixedPoints
+   * @param {string} bowPosition
+   * @param {number} [amplitude=CONFIG.VIBRATION_AMPLITUDE]
    */
-  compute(fixedPoints, bowPosition) {
+  compute(fixedPoints, bowPosition, amplitude = CONFIG.VIBRATION_AMPLITUDE) {
     this.fixedPoints = fixedPoints;
     this.bowPosition = bowPosition;
     const { res, data } = this;
@@ -126,19 +131,19 @@ class RealisticChladniField {
         const x = col / (res - 1);
         const y = row / (res - 1);
 
-        // Excitation from bow position
-        const excitation = this._calculateExcitation(x, y);
+        // Excitation from bow position (scaled by amplitude)
+        const excitation = this._calculateExcitation(x, y, amplitude);
 
         // Contribution from each fixed point (wave from that point)
-        let amplitude = 0;
+        let waveSum = 0;
         for (const fp of fixedPoints) {
           const dist = Math.sqrt((x - fp.x) ** 2 + (y - fp.y) ** 2);
           // Standing wave: sin(dist * π * freq) decays away from fixed point
-          amplitude += Math.sin(dist * Math.PI * 8) / (1 + dist * 6);
+          waveSum += Math.sin(dist * Math.PI * 8) / (1 + dist * 6);
         }
 
         // Modulate by excitation
-        const val = Math.abs(amplitude * excitation);
+        const val = Math.abs(waveSum * excitation);
         data[row * res + col] = val;
         if (val > maxVal) maxVal = val;
       }
@@ -154,16 +159,35 @@ class RealisticChladniField {
 
   /**
    * Excitation intensity at (x, y) from the bow position.
-   * Bow sits at one edge and drives maximum vibration there.
+   * Uses a gentler decay (coefficient 3 vs. the old 20) so that the entire
+   * plate receives vibration energy, plus a standing-wave modulation and a
+   * configurable amplitude scale.
+   *
+   * @param {number} x         - normalised x ∈ [0,1]
+   * @param {number} y         - normalised y ∈ [0,1]
+   * @param {number} amplitude - scale factor ∈ [0,1]
    */
-  _calculateExcitation(x, y) {
+  _calculateExcitation(x, y, amplitude = 1.0) {
+    let dist;
     switch (this.bowPosition) {
-      case 'top':    return Math.exp(-(y ** 2) * 20);
-      case 'bottom': return Math.exp(-((1 - y) ** 2) * 20);
-      case 'left':   return Math.exp(-(x ** 2) * 20);
-      case 'right':  return Math.exp(-((1 - x) ** 2) * 20);
-      default:       return 1;
+      case 'top':    dist = y;       break;
+      case 'bottom': dist = 1 - y;   break;
+      case 'left':   dist = x;       break;
+      case 'right':  dist = 1 - x;   break;
+      default:       dist = 0.5;
     }
+
+    // Gentler decay ensures far regions still vibrate.
+    // The 0.3 base floor guarantees a minimum energy across the entire plate;
+    // the remaining 0.7 ramps up toward the bow edge.
+    const baseExcitation = 0.3 + 0.7 * Math.exp(-(dist ** 2) * CONFIG.EXCITATION_DECAY);
+
+    // Standing-wave modulation — adds physical realism (constructive /
+    // destructive interference along the propagation axis).
+    // The 0.5 ± 0.5 envelope keeps the result in [0, 1].
+    const standingWave = Math.cos(dist * Math.PI * 2);
+
+    return amplitude * baseExcitation * (0.5 + 0.5 * standingWave);
   }
 
   /**
@@ -344,6 +368,27 @@ class ChladniSimulation {
     this._bindSlider('modeM',          v => { this.m = v;             this._rebuildField(); });
     this._bindSlider('modeN',          v => { this.n = v;             this._rebuildField(); });
     this._bindSlider('particleCount',  v => { this.particleCount = v; this._adjustParticles(); });
+
+    // Vibration Amplitude slider (physical mode only)
+    const ampSlider = document.getElementById('vibration-amplitude');
+    const ampBadge  = document.getElementById('vibration-amplitude-value');
+    ampSlider.addEventListener('input', () => {
+      const v = parseInt(ampSlider.value, 10);
+      CONFIG.VIBRATION_AMPLITUDE = v / 100;
+      ampBadge.textContent = v + '%';
+      if (this.simulationMode === 'physical') {
+        this._rebuildField();
+      }
+    });
+
+    // Force Scale slider
+    const fsSlider = document.getElementById('force-scale');
+    const fsBadge  = document.getElementById('force-scale-value');
+    fsSlider.addEventListener('input', () => {
+      const v = parseInt(fsSlider.value, 10);
+      CONFIG.FORCE_SCALE = v / 100;
+      fsBadge.textContent = v + '%';
+    });
 
     // Heatmap toggle
     document.getElementById('showHeatmap').addEventListener('change', e => {
@@ -562,7 +607,7 @@ class ChladniSimulation {
       this.mathField.compute(this.m, this.n);
       this.heatmap.update(this.mathField);
     } else {
-      this.physField.compute(this.fixedPoints, this.bowPosition);
+      this.physField.compute(this.fixedPoints, this.bowPosition, CONFIG.VIBRATION_AMPLITUDE);
       this.heatmap.update(this.physField);
     }
     // Scatter particles so they find new node lines
@@ -575,7 +620,7 @@ class ChladniSimulation {
       this.mathField.compute(this.m, this.n);
       this.heatmap.update(this.mathField);
     } else {
-      this.physField.compute(this.fixedPoints, this.bowPosition);
+      this.physField.compute(this.fixedPoints, this.bowPosition, CONFIG.VIBRATION_AMPLITUDE);
       this.heatmap.update(this.physField);
     }
     this.particles = Array.from(
