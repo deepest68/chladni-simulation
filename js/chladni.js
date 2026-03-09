@@ -8,6 +8,16 @@
 
 'use strict';
 
+// Musical frequencies (Equal Temperament)
+const MUSICAL_FREQUENCIES = {
+  3: { C: 130.81, D: 146.83, E: 164.81, F: 174.61, G: 196.00, A: 220.00, B: 246.94 },
+  4: { C: 261.63, D: 293.66, E: 329.63, F: 349.23, G: 392.00, A: 440.00, B: 493.88 },
+  5: { C: 523.25, D: 587.33, E: 659.25, F: 698.46, G: 783.99, A: 880.00, B: 987.77 },
+  6: { C: 1046.50, D: 1174.66, E: 1318.51, F: 1396.91, G: 1567.98, A: 1760.00, B: 1975.53 }
+};
+
+const KOREAN_NOTES = { C: '도', D: '레', E: '미', F: '파', G: '솔', A: '라', B: '시' };
+
 /* ─────────────────────────────────────────────
    Configuration
 ───────────────────────────────────────────── */
@@ -354,6 +364,7 @@ class ChladniSimulation {
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._reset();
+    this._initMusicScale();
     this._loop();
   }
 
@@ -586,6 +597,62 @@ class ChladniSimulation {
       msg.textContent = `고정점이 최대 개수(${CONFIG.MAX_FIXED_POINTS}개)에 도달했습니다`;
       msg.className = 'fix-point-message warning';
     }
+  }
+
+  /* ── Musical Scale Selector ─────────────────── */
+  _initMusicScale() {
+    let currentOctave = 4;
+    let currentNote = 'A';
+
+    const updateFrequency = () => {
+      const freq = MUSICAL_FREQUENCIES[currentOctave][currentNote];
+      const korean = KOREAN_NOTES[currentNote];
+
+      const freqDisplay = document.getElementById('current-frequency');
+      const noteDisplay = document.getElementById('current-note-name');
+
+      if (freqDisplay) freqDisplay.textContent = `${freq.toFixed(2)} Hz`;
+      if (noteDisplay) noteDisplay.textContent = `(${currentNote}${currentOctave} - ${korean})`;
+
+      const freqSlider = document.getElementById('frequency');
+      const freqValue = document.getElementById('frequency-value');
+      if (freqSlider) freqSlider.value = freq;
+      if (freqValue) freqValue.textContent = Math.round(freq);
+
+      if (this.simulationMode === 'physical') this._rebuildField();
+    };
+
+    // Octave buttons
+    document.querySelectorAll('.octave-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.octave-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentOctave = parseInt(btn.dataset.octave);
+        updateFrequency();
+      });
+    });
+
+    // Note buttons
+    document.querySelectorAll('.note-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.note-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentNote = btn.dataset.note;
+        updateFrequency();
+      });
+    });
+
+    // Show/hide with mode
+    document.querySelectorAll('input[name="simMode"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        const scaleSelector = document.getElementById('scale-selector');
+        if (scaleSelector) {
+          scaleSelector.style.display = e.target.value === 'physical' ? 'block' : 'none';
+        }
+      });
+    });
+
+    updateFrequency();
   }
 
   /* ── Resize canvas to fill wrapper ─────────── */

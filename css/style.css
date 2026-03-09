@@ -639,3 +639,40 @@ input[type="range"]:hover::-moz-range-thumb {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Musical Scale Buttons */
+.octave-btn, .note-btn {
+  background: rgba(255,255,255,0.1);
+  border: 2px solid rgba(255,255,255,0.3);
+  color: white;
+  padding: 8px 12px;
+  margin: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 14px;
+}
+
+.note-btn {
+  min-width: 50px;
+  text-align: center;
+}
+
+.note-btn small {
+  display: block;
+  font-size: 10px;
+  color: rgba(255,255,255,0.6);
+  margin-top: 2px;
+}
+
+.octave-btn:hover, .note-btn:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-2px);
+}
+
+.octave-btn.active, .note-btn.active {
+  background: rgba(100,150,255,0.6);
+  border-color: rgb(100,150,255);
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(100,150,255,0.5);
+}
